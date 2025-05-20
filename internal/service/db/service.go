@@ -325,7 +325,7 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
     WHERE
         g.id = $1
     GROUP BY
-        g.id, g.title, g.description, g.full_text, g.time, g.views_count;`
+        g.id, g.title, g.description, g.full_text, g.time, g.views_count`
 
 	dbClient, err := g.connectToDB()
 	if err != nil {
