@@ -104,7 +104,7 @@ func (a *API) GetTop(c *gin.Context) {
 	}
 
 	var items []model.List
-	ok, err := a.cache.GetJSON("top", &items)
+	ok, err := a.cache.GetJSON("clusters:top", &items)
 	if err == nil && ok {
 		c.JSON(200, gin.H{"items": items})
 		return
@@ -120,7 +120,7 @@ func (a *API) GetTop(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"items": items})
-	err = a.cache.Set("top", items, 10*time.Minute)
+	err = a.cache.Set("clusters:top", items, 10*time.Minute)
 	if err != nil {
 		log.Println(err)
 	}
@@ -137,7 +137,7 @@ func (a *API) GetRT(c *gin.Context) {
 
 	var items []model.List
 	if is_rt {
-		ok, err := a.cache.GetJSON("rt", &items)
+		ok, err := a.cache.GetJSON("clusters:rt", &items)
 		if err == nil && ok {
 			c.JSON(200, gin.H{"items": items})
 			return
@@ -145,7 +145,7 @@ func (a *API) GetRT(c *gin.Context) {
 			log.Println(err)
 		}
 	} else {
-		ok, err := a.cache.GetJSON("not_rt", &items)
+		ok, err := a.cache.GetJSON("clusters:not_rt", &items)
 		if err == nil && ok {
 			c.JSON(200, gin.H{"items": items})
 			return
@@ -163,9 +163,9 @@ func (a *API) GetRT(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"items": items})
 	if is_rt {
-		err = a.cache.Set("rt", items, 10*time.Minute)
+		err = a.cache.Set("clusters:rt", items, 10*time.Minute)
 	} else {
-		err = a.cache.Set("not_rt", items, 10*time.Minute)
+		err = a.cache.Set("clusters:not_rt", items, 10*time.Minute)
 	}
 	if err != nil {
 		log.Println(err)
@@ -186,7 +186,7 @@ func (a *API) GetByID(c *gin.Context) {
 	}
 
 	var item model.News
-	ok, err := a.cache.GetJSON(id_str, &item)
+	ok, err := a.cache.GetJSON("clusters:"+id_str, &item)
 	if err == nil && ok {
 		c.JSON(200, item)
 		return
@@ -203,7 +203,7 @@ func (a *API) GetByID(c *gin.Context) {
 	}
 
 	c.JSON(200, item)
-	err = a.cache.Set(id_str, item, 1*time.Hour)
+	err = a.cache.Set("clusters:"+id_str, item, 1*time.Hour)
 	if err != nil {
 		log.Println(err)
 	}
@@ -233,7 +233,7 @@ func (a *API) GetSimilar(c *gin.Context) {
 		limit = 10
 	}
 	var items []model.List
-	ok, err := a.cache.GetJSON(id_str, &items)
+	ok, err := a.cache.GetJSON("clusters:similar:"+id_str, &items)
 	if err == nil && ok {
 		c.JSON(200, gin.H{"items": items})
 		return
@@ -249,7 +249,7 @@ func (a *API) GetSimilar(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"items": items})
-	err = a.cache.Set(id_str, items, 1*time.Hour)
+	err = a.cache.Set("clusters:similar:"+id_str, items, 1*time.Hour)
 	if err != nil {
 		log.Println(err)
 	}
