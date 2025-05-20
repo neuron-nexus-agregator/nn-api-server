@@ -313,3 +313,19 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
 	}
 	return group, nil
 }
+
+func (g *DB) IncrementVies(id uint64) error {
+	req := `UPDATE groups SET views = views + 1 WHERE id = $1`
+	db, err := g.connectToDB()
+	if err != nil {
+		log.Default().Println("Error connecting to DB: ", err.Error())
+		return err
+	}
+	defer db.Close()
+	_, err = db.Exec(req, id)
+	if err != nil {
+		log.Default().Println("Error incrementing views: ", err.Error())
+		return err
+	}
+	return nil
+}

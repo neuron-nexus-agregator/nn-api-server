@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -151,6 +152,12 @@ func (a *API) GetByID(c *gin.Context) {
 	}
 
 	c.JSON(200, item)
+	go func() {
+		err := a.db.IncrementVies(item.ID)
+		if err != nil {
+			log.Default().Println(err)
+		}
+	}()
 }
 
 func (a *API) GetSimilar(c *gin.Context) {
