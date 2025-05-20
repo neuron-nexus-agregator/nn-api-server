@@ -2,28 +2,27 @@ package rest
 
 import (
 	"log"
-	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/patrickmn/go-cache"
 
 	model "agregator/api/internal/model/db"
 	"agregator/api/internal/service/db"
+	"agregator/api/internal/service/redis"
 )
 
 type API struct {
 	db    *db.DB
-	cache *cache.Cache
+	cache *redis.RedisCache
 }
 
 func New() *API {
-	c := cache.New(10*time.Minute, 15*time.Minute)
 	return &API{
 		db:    db.New(),
-		cache: c,
+		cache: redis.New(os.Getenv("REDIS_ADDR"), os.Getenv("REDIS_PASSWORD")),
 	}
 }
 
@@ -103,7 +102,17 @@ func (a *API) GetTop(c *gin.Context) {
 	if err != nil {
 		limit = 15
 	}
-	items, err := a.db.GetTopGroupsByFeedCount(limit)
+
+	var items []model.List
+	ok, err := a.cache.GetJSON("top", &items)
+	if err == nil && ok {
+		c.JSON(200, gin.H{"items": items})
+		return
+	} else if err != nil {
+		log.Println(err)
+	}
+
+	items, err = a.db.GetTopGroupsByFeedCount(limit)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": err.Error(),
@@ -111,6 +120,10 @@ func (a *API) GetTop(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"items": items})
+	err = a.cache.Set("top", items, 10*time.Minute)
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 func (a *API) GetRT(c *gin.Context) {
@@ -121,7 +134,27 @@ func (a *API) GetRT(c *gin.Context) {
 	}
 	is_rt_str := c.DefaultQuery("rt", "true")
 	is_rt := strings.ToLower(is_rt_str) == "true"
-	items, err := a.db.GetRTGroups(limit, is_rt)
+
+	var items []model.List
+	if is_rt {
+		ok, err := a.cache.GetJSON("rt", &items)
+		if err == nil && ok {
+			c.JSON(200, gin.H{"items": items})
+			return
+		} else if err != nil {
+			log.Println(err)
+		}
+	} else {
+		ok, err := a.cache.GetJSON("not_rt", &items)
+		if err == nil && ok {
+			c.JSON(200, gin.H{"items": items})
+			return
+		} else if err != nil {
+			log.Println(err)
+		}
+	}
+
+	items, err = a.db.GetRTGroups(limit, is_rt)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": err.Error(),
@@ -129,6 +162,14 @@ func (a *API) GetRT(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"items": items})
+	if is_rt {
+		err = a.cache.Set("rt", items, 10*time.Minute)
+	} else {
+		err = a.cache.Set("not_rt", items, 10*time.Minute)
+	}
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 func (a *API) GetByID(c *gin.Context) {
@@ -143,7 +184,17 @@ func (a *API) GetByID(c *gin.Context) {
 		})
 		return
 	}
-	item, err := a.db.GetByID(id)
+
+	var item model.News
+	ok, err := a.cache.GetJSON(id_str, &item)
+	if err == nil && ok {
+		c.JSON(200, item)
+		return
+	} else if err != nil {
+		log.Println(err)
+	}
+
+	item, err = a.db.GetByID(id)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": err.Error(),
@@ -152,6 +203,10 @@ func (a *API) GetByID(c *gin.Context) {
 	}
 
 	c.JSON(200, item)
+	err = a.cache.Set(id_str, item, 1*time.Hour)
+	if err != nil {
+		log.Println(err)
+	}
 	go func() {
 		err := a.db.IncrementVies(item.ID)
 		if err != nil {
@@ -177,23 +232,25 @@ func (a *API) GetSimilar(c *gin.Context) {
 	if err != nil {
 		limit = 10
 	}
-
-	if data, found := a.cache.Get(id_str); found {
-		if values, ok := data.([]model.List); ok {
-			if uint64(len(values)) >= limit {
-				c.JSON(http.StatusOK, gin.H{"items": values[:limit]})
-				return
-			}
-		}
+	var items []model.List
+	ok, err := a.cache.GetJSON(id_str, &items)
+	if err == nil && ok {
+		c.JSON(200, gin.H{"items": items})
+		return
+	} else if err != nil {
+		log.Println(err)
 	}
 
-	items, err := a.db.GetSimilarGroups(id, limit)
+	items, err = a.db.GetSimilarGroups(id, limit)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 		})
 		return
 	}
-	a.cache.Add(id_str, items, cache.DefaultExpiration)
 	c.JSON(200, gin.H{"items": items})
+	err = a.cache.Set(id_str, items, 1*time.Hour)
+	if err != nil {
+		log.Println(err)
+	}
 }
