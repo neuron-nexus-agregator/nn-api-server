@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -20,6 +22,17 @@ type DB struct {
 	login    string
 	password string
 	db_name  string
+}
+
+type newsDB struct {
+	ID          uint64          `db:"id"`
+	Title       string          `db:"title"`
+	Description sql.NullString  `db:"description"`
+	FullText    sql.NullString  `db:"full_text"`
+	Time        time.Time       `db:"time"`
+	Enclosure   sql.NullString  `db:"enclosure"`
+	ViewsCount  uint64          `db:"views_count"`
+	SourcesJSON json.RawMessage `db:"sources_json"` // Здесь будет JSON-массив источников
 }
 
 func New() *DB {
@@ -271,46 +284,90 @@ func (g *DB) GetSimilarGroups(id, limit uint64) ([]model.List, error) {
 	return groups, nil
 }
 
+// GetByID теперь получает группу и все ее источники за один запрос
 func (g *DB) GetByID(id uint64) (model.News, error) {
-	req := `SELECT groups.id, feed.title, feed.description, feed.full_text, groups.time,
-	(
-                SELECT COALESCE(feed.enclosure, '')
-                FROM compares
-                JOIN feed ON feed.id = compares.feed_id
-                WHERE compares.group_id = groups.id 
-                  AND feed.enclosure IS NOT NULL 
-                  AND feed.enclosure != ''
-                LIMIT 1
-            ) AS enclosure
-	FROM groups
-	JOIN feed ON feed.id = groups.feed_id
-	WHERE groups.id = $1`
+	req := `
+    SELECT
+        g.id,
+        g.title,
+        g.description,
+        g.full_text,
+        g.time,
+        g.views_count,
+        (
+            SELECT COALESCE(f_enc.enclosure, '')
+            FROM compares AS c_enc
+            JOIN feed AS f_enc ON f_enc.id = c_enc.feed_id
+            WHERE c_enc.group_id = g.id
+              AND f_enc.enclosure IS NOT NULL
+              AND f_enc.enclosure != ''
+            LIMIT 1
+        ) AS enclosure,
+        COALESCE(
+            json_agg(
+                json_build_object(
+                    'title', fc.title,
+                    'link', fc.link,
+                    'name', fc.source_name,
+                    'pubDate', fc.time,
+                    'description', fc.description,
+                    'fullText', fc.full_text,
+                    'enclosure', fc.enclosure
+                ) ORDER BY fc.time DESC, fc.id
+            ) FILTER (WHERE fc.id IS NOT NULL),
+        '[]'::json) AS sources_json
+    FROM
+        groups AS g
+    LEFT JOIN
+        compares AS cp ON cp.group_id = g.id
+    LEFT JOIN
+        feed AS fc ON fc.id = cp.feed_id
+    WHERE
+        g.id = $1
+    GROUP BY
+        g.id, g.title, g.description, g.full_text, g.time, g.views_count;`
 
-	db, err := g.connectToDB()
+	dbClient, err := g.connectToDB()
 	if err != nil {
-		log.Default().Println("Error connecting to DB: ", err.Error())
-		return model.News{}, err
+		log.Printf("Error connecting to DB: %v", err)
+		return model.News{}, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer db.Close()
-	var group model.News
-	err = db.Get(&group, req, id)
+	defer dbClient.Close()
+
+	var dbNews newsDB
+	err = dbClient.Get(&dbNews, req, id)
 	if err != nil {
-		log.Default().Println("Error gettin news: ", err.Error())
-		return model.News{}, err
+		if err == sql.ErrNoRows {
+			return model.News{}, fmt.Errorf("group with ID %d not found: %w", id, err)
+		}
+		log.Printf("Error getting news group %d: %v", id, err)
+		return model.News{}, fmt.Errorf("failed to query group %d: %w", id, err)
 	}
 
 	var sources []model.Source
-	req = `SELECT feed.title, feed.link, feed.source_name, feed.time, feed.description, feed.full_text, feed.enclosure
-	FROM compares
-	JOIN feed ON feed.id = compares.feed_id
-	WHERE compares.group_id = $1
-	ORDER BY feed.time desc`
-	err = db.Select(&sources, req, id)
-	if err == nil {
-		group.Sources = sources
-	} else {
-		log.Default().Println("Error getting sources: ", err.Error())
+	// Демаршалируем JSON-массив источников
+	if len(dbNews.SourcesJSON) > 0 {
+		err = json.Unmarshal(dbNews.SourcesJSON, &sources)
+		if err != nil {
+			log.Printf("Error unmarshaling sources JSON for group %d: %v", id, err)
+			// В случае ошибки демаршалинга, можно вернуть ошибку или пустой слайс sources
+			// В данном случае, возвращаем ошибку, так как это может быть критично.
+			return model.News{}, fmt.Errorf("failed to parse sources for group %d: %w", id, err)
+		}
 	}
+
+	// Собираем конечную структуру model.News
+	group := model.News{
+		ID:          dbNews.ID,
+		Title:       dbNews.Title,
+		Description: dbNews.Description, // Уже sql.NullString
+		FullText:    dbNews.FullText,    // Уже sql.NullString
+		Time:        dbNews.Time,
+		Enclosure:   dbNews.Enclosure, // Уже sql.NullString
+		ViewsCount:  dbNews.ViewsCount,
+		Sources:     sources,
+	}
+
 	return group, nil
 }
 

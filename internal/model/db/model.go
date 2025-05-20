@@ -1,6 +1,9 @@
 package db
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 type List struct {
 	ID          uint64    `db:"id" json:"id"`
@@ -13,21 +16,22 @@ type List struct {
 }
 
 type Source struct {
-	Title       string    `db:"title" json:"title"`
-	SourceName  string    `db:"source_name" json:"name"`
-	Time        time.Time `db:"time" json:"pubDate"`
-	Link        string    `db:"link" json:"link"`
-	Descritpion string    `db:"description" json:"description,omitempty"`
-	FullText    string    `db:"full_text" json:"fullText"`
-	Enclosure   *string   `db:"enclosure" json:"enclosure,omitempty"`
+	Title       string         `json:"title" db:"source_title"`                       // Заголовок источника
+	SourceName  string         `json:"name" db:"source_name"`                         // Имя источника (например, "BBC News")
+	Time        time.Time      `json:"pubDate" db:"source_time"`                      // Время публикации источника
+	Link        string         `json:"link" db:"source_link"`                         // Ссылка на оригинальный источник
+	Description sql.NullString `json:"description,omitempty" db:"source_description"` // Описание из источника
+	FullText    sql.NullString `json:"full_text" db:"source_full_text"`               // Полный текст из источника
+	Enclosure   sql.NullString `json:"enclosure,omitempty" db:"source_enclosure"`     // Обложка из источника
 }
 
 type News struct {
-	ID          uint64    `db:"id" json:"id"`
-	Title       string    `db:"title" json:"title"`
-	Descritpion string    `db:"description" json:"description,omitempty"`
-	Time        time.Time `db:"time" json:"date"`
-	FullText    string    `db:"full_text" json:"rewrite"`
-	Enclosure   *string   `db:"enclosure" json:"enclosure,omitempty"`
-	Sources     []Source  `db:"-" json:"sources"`
+	ID          uint64         `json:"id" db:"id"`
+	Title       string         `json:"title" db:"title"`                       // Это теперь заголовок ГРУППЫ
+	Description sql.NullString `json:"description,omitempty" db:"description"` // Описание ГРУППЫ
+	Time        time.Time      `json:"date" db:"time"`                         // Время создания ГРУППЫ
+	FullText    sql.NullString `json:"rewrite" db:"full_text"`                 // Полный текст ГРУППЫ (вероятно, rewrite)
+	Enclosure   sql.NullString `json:"enclosure,omitempty" db:"enclosure"`     // Обложка ГРУППЫ
+	Sources     []Source       `json:"sources" db:"-"`                         // Массив дочерних источников
+	ViewsCount  uint64         `json:"viewsCount" db:"views_count"`            // Счетчик просмотров группы
 }
