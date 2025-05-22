@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -13,11 +12,13 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
+	"agregator/api/internal/interfaces"
 	model "agregator/api/internal/model/db"
 )
 
 type DB struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	logger interfaces.Logger
 }
 
 type newsDB struct {
@@ -31,13 +32,14 @@ type newsDB struct {
 	SourcesJSON json.RawMessage `db:"sources_json"` // Здесь будет JSON-массив источников
 }
 
-func New() (*DB, error) {
+func New(logger interfaces.Logger) (*DB, error) {
 
 	connectionData := fmt.Sprintf("user=%s dbname=%s sslmode=disable password=%s host=%s port=%s", os.Getenv("DB_LOGIN"), "newagregator", os.Getenv("DB_PASSWORD"), os.Getenv("DB_HOST"), os.Getenv("DB_PORT"))
 	db, err := sqlx.Connect("postgres", connectionData)
 
 	return &DB{
-		db: db,
+		db:     db,
+		logger: logger,
 	}, err
 }
 
@@ -45,6 +47,7 @@ func (g *DB) GetLastIndex() (uint64, error) {
 	var index uint64
 	err := g.db.QueryRow("SELECT MAX(id) FROM groups").Scan(&index)
 	if err != nil {
+		g.logger.Error("Error getting last index", "error", err)
 		return 0, err
 	}
 	return index, nil
@@ -100,7 +103,7 @@ func (g *DB) Get(lastDate time.Time, limit uint64, search ...string) ([]model.Li
 	// Выполняем запрос
 	stmt, err := g.db.Preparex(baseReq)
 	if err != nil {
-		log.Default().Println("Error preparing query: ", err.Error())
+		g.logger.Error("Error preparing statement", "error", err.Error())
 		return nil, err
 	}
 	defer stmt.Close()
@@ -108,7 +111,7 @@ func (g *DB) Get(lastDate time.Time, limit uint64, search ...string) ([]model.Li
 	var groups []model.List
 	err = stmt.Select(&groups, args...)
 	if err != nil {
-		log.Default().Println("Error getting groups: ", err.Error())
+		g.logger.Error("Error executing statement", "error", err.Error())
 		return nil, err
 	}
 
@@ -148,7 +151,7 @@ func (g *DB) GetTopGroupsByFeedCount(limit uint64) ([]model.List, error) {
 
 	stmt, err := g.db.Preparex(req)
 	if err != nil {
-		log.Default().Println("Error preparing query: ", err.Error())
+		g.logger.Error("Error preparing query", "error", err.Error())
 		return nil, err
 	}
 	defer stmt.Close()
@@ -156,7 +159,7 @@ func (g *DB) GetTopGroupsByFeedCount(limit uint64) ([]model.List, error) {
 	var groups []model.List
 	err = stmt.Select(&groups, limit)
 	if err != nil {
-		log.Default().Println("Error getting top groups by feed count: ", err.Error())
+		g.logger.Error("Error executing query", "error", err.Error())
 		return nil, err
 	}
 
@@ -190,7 +193,7 @@ func (g *DB) GetRTGroups(limit uint64, is_rt bool) ([]model.List, error) {
 
 	stmt, err := g.db.Preparex(req)
 	if err != nil {
-		log.Default().Println("Error preparing query: ", err.Error())
+		g.logger.Error("Error preparing query", "error", err.Error())
 		return nil, err
 	}
 	defer stmt.Close()
@@ -198,7 +201,7 @@ func (g *DB) GetRTGroups(limit uint64, is_rt bool) ([]model.List, error) {
 	var groups []model.List
 	err = stmt.Select(&groups, is_rt, limit)
 	if err != nil {
-		log.Default().Println("Error getting RT groups: ", err.Error())
+		g.logger.Error("Error executing query", "error", err.Error())
 		return nil, err
 	}
 
@@ -236,7 +239,7 @@ func (g *DB) GetSimilarGroups(id, limit uint64) ([]model.List, error) {
 	var groups []model.List
 	err := g.db.Select(&groups, req, id, limit)
 	if err != nil {
-		log.Default().Println("Error getting similar groups: ", err.Error())
+		g.logger.Error("Error executing query", "error", err.Error())
 		return nil, err
 	}
 
@@ -292,7 +295,7 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
 		if err == sql.ErrNoRows {
 			return model.News{}, fmt.Errorf("group with ID %d not found: %w", id, err)
 		}
-		log.Printf("Error getting news group %d: %v", id, err)
+		g.logger.Error("Error executing query", "error", err.Error())
 		return model.News{}, fmt.Errorf("failed to query group %d: %w", id, err)
 	}
 
@@ -301,7 +304,7 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
 	if len(dbNews.SourcesJSON) > 0 {
 		err = json.Unmarshal(dbNews.SourcesJSON, &sources)
 		if err != nil {
-			log.Printf("Error unmarshaling sources JSON for group %d: %v", id, err)
+			g.logger.Error("Error parsing sources for group", "error", err.Error(), "id", id)
 			// В случае ошибки демаршалинга, можно вернуть ошибку или пустой слайс sources
 			// В данном случае, возвращаем ошибку, так как это может быть критично.
 			return model.News{}, fmt.Errorf("failed to parse sources for group %d: %w", id, err)
@@ -327,7 +330,7 @@ func (g *DB) IncrementVies(id uint64) error {
 	req := `UPDATE groups SET views = views + 1 WHERE id = $1`
 	_, err := g.db.Exec(req, id)
 	if err != nil {
-		log.Default().Println("Error incrementing views: ", err.Error())
+		g.logger.Error("Error executing query", "error", err.Error())
 		return err
 	}
 	return nil
@@ -337,7 +340,7 @@ func (g *DB) UpdateViews(id uint64, views uint64) error {
 	req := `UPDATE groups SET views = views + $1 WHERE id = $2`
 	_, err := g.db.Exec(req, views, id)
 	if err != nil {
-		log.Default().Println("Error updating views: ", err.Error())
+		g.logger.Error("Error executing query", "error", err.Error())
 		return err
 	}
 	return nil
@@ -346,19 +349,19 @@ func (g *DB) UpdateViews(id uint64, views uint64) error {
 func (g *DB) UpdateViewsBatch(views map[int64]int64) error {
 	tx, err := g.db.Begin()
 	if err != nil {
-		log.Default().Println("Error starting transaction: ", err.Error())
+		g.logger.Error("Error starting transaction", "error", err.Error())
 		return err
 	}
 	for id, views := range views {
 		_, err := tx.Exec(`UPDATE groups SET views = views + $1 WHERE id = $2`, views, id)
 		if err != nil {
-			log.Default().Println("Error updating views: ", err.Error())
+			g.logger.Error("Error updating views", "error", err.Error())
 			return err
 		}
 	}
 	err = tx.Commit()
 	if err != nil {
-		log.Default().Println("Error committing transaction: ", err.Error())
+		g.logger.Error("Error committing transaction", "error", err.Error())
 		return err
 	}
 	return nil

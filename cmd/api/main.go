@@ -1,8 +1,12 @@
 package main
 
-import "agregator/api/internal/pkg/app"
+import (
+	"agregator/api/internal/pkg/app"
+	"log/slog"
+)
 
 func main() {
-	app := app.New()
+	logger := slog.Default
+	app := app.New(logger())
 	app.Run()
 }

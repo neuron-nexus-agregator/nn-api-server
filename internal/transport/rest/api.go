@@ -10,21 +10,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"agregator/api/internal/interfaces"
 	model "agregator/api/internal/model/db"
 	"agregator/api/internal/service/db"
 	"agregator/api/internal/service/redis"
 )
 
 type API struct {
-	db    *db.DB
-	cache *redis.RedisCache
+	db     *db.DB
+	cache  *redis.RedisCache
+	logger interfaces.Logger
 }
 
-func New() (*API, error) {
-	db, err := db.New()
+func New(logger interfaces.Logger) (*API, error) {
+	db, err := db.New(logger)
 	api := &API{
-		db:    db,
-		cache: redis.New(os.Getenv("REDIS_ADDR"), os.Getenv("REDIS_PASSWORD")),
+		db:     db,
+		cache:  redis.New(os.Getenv("REDIS_ADDR"), os.Getenv("REDIS_PASSWORD")),
+		logger: logger,
 	}
 	if err != nil {
 		return nil, err
@@ -48,13 +51,13 @@ func (a *API) updateViews(ctx context.Context) {
 		case <-ticker.C:
 			views, err := a.cache.GetAllViews()
 			if err != nil {
-				log.Default().Println("Error getting views: ", err.Error())
+				a.logger.Error("Error getting views", "error", err.Error())
 				continue
 			}
 			for key, value := range views {
 				err := a.db.UpdateViews(uint64(key), uint64(value))
 				if err != nil {
-					log.Default().Println("Error updating views: ", err.Error())
+					a.logger.Error("Error updating views", "error", err.Error())
 				}
 			}
 		}
@@ -64,6 +67,7 @@ func (a *API) updateViews(ctx context.Context) {
 func (a *API) GetMax(c *gin.Context) {
 	max, err := a.db.GetLastIndex()
 	if err != nil {
+		a.logger.Error("Error getting max", "error", err.Error())
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 		})
@@ -116,6 +120,7 @@ func (a *API) Get(c *gin.Context) {
 	} else {
 		items, err := a.db.Get(date, limit, search_elements...)
 		if err != nil {
+			a.logger.Error("Error getting items", "error", err.Error())
 			c.JSON(500, gin.H{
 				"error": err.Error(),
 			})
@@ -138,11 +143,12 @@ func (a *API) GetTop(c *gin.Context) {
 		c.JSON(200, gin.H{"items": items})
 		return
 	} else if err != nil {
-		log.Println(err)
+		a.logger.Error("Error getting items from cache", "error", err.Error())
 	}
 
 	items, err = a.db.GetTopGroupsByFeedCount(limit)
 	if err != nil {
+		a.logger.Error("Error getting items from database", "error", err.Error())
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 		})
@@ -171,7 +177,7 @@ func (a *API) GetRT(c *gin.Context) {
 			c.JSON(200, gin.H{"items": items})
 			return
 		} else if err != nil {
-			log.Println(err)
+			a.logger.Error("Error getting items from cache", "error", err.Error())
 		}
 	} else {
 		ok, err := a.cache.GetJSON("clusters:not_rt", &items)
@@ -179,12 +185,13 @@ func (a *API) GetRT(c *gin.Context) {
 			c.JSON(200, gin.H{"items": items})
 			return
 		} else if err != nil {
-			log.Println(err)
+			a.logger.Error("Error getting items from cache", "error", err.Error())
 		}
 	}
 
 	items, err = a.db.GetRTGroups(limit, is_rt)
 	if err != nil {
+		a.logger.Error("Error getting items from database", "error", err.Error())
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 		})
@@ -195,9 +202,10 @@ func (a *API) GetRT(c *gin.Context) {
 		err = a.cache.Set("clusters:rt", items, 10*time.Minute)
 	} else {
 		err = a.cache.Set("clusters:not_rt", items, 10*time.Minute)
+
 	}
 	if err != nil {
-		log.Println(err)
+		a.logger.Error("Error setting items in cache", "error", err.Error())
 	}
 }
 
@@ -208,6 +216,7 @@ func (a *API) GetByID(c *gin.Context) {
 	id_str := c.Param("id")
 	id, err := strconv.ParseUint(id_str, 10, 64)
 	if err != nil {
+		a.logger.Error("Error getting id", "error", err.Error())
 		c.JSON(400, gin.H{
 			"error": err.Error(),
 		})
@@ -220,11 +229,13 @@ func (a *API) GetByID(c *gin.Context) {
 		c.JSON(200, item)
 		return
 	} else if err != nil {
+		a.logger.Error("Error getting data from cache", "error", err.Error())
 		log.Println(err)
 	}
 
 	item, err = a.db.GetByID(id)
 	if err != nil {
+		a.logger.Error("Error getting data from database", "error", err.Error())
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 		})
@@ -234,12 +245,12 @@ func (a *API) GetByID(c *gin.Context) {
 	c.JSON(200, item)
 	err = a.cache.Set("clusters:"+id_str, item, 1*time.Hour)
 	if err != nil {
-		log.Println(err)
+		a.logger.Error("Error setting data in cache", "error", err.Error())
 	}
 	go func() {
 		err := a.cache.IncViews(id_str)
 		if err != nil {
-			log.Println(err)
+			a.logger.Error("Error getting data from cache", "error", err.Error())
 		}
 	}()
 }
@@ -251,6 +262,7 @@ func (a *API) GetSimilar(c *gin.Context) {
 	id_str := c.Param("id")
 	id, err := strconv.ParseUint(id_str, 10, 64)
 	if err != nil {
+		a.logger.Error("Error getting id", "error", err.Error())
 		c.JSON(400, gin.H{
 			"error": err.Error(),
 		})
@@ -267,11 +279,12 @@ func (a *API) GetSimilar(c *gin.Context) {
 		c.JSON(200, gin.H{"items": items})
 		return
 	} else if err != nil {
-		log.Println(err)
+		a.logger.Error("Error getting items from cache", "error", err.Error())
 	}
 
 	items, err = a.db.GetSimilarGroups(id, limit)
 	if err != nil {
+		a.logger.Error("Error getting items from database", "error", err.Error())
 		c.JSON(500, gin.H{
 			"error": err.Error(),
 		})
@@ -280,6 +293,6 @@ func (a *API) GetSimilar(c *gin.Context) {
 	c.JSON(200, gin.H{"items": items})
 	err = a.cache.Set("clusters:similar:"+id_str, items, 1*time.Hour)
 	if err != nil {
-		log.Println(err)
+		a.logger.Error("Error setting items in cache", "error", err.Error())
 	}
 }

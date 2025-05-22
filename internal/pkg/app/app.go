@@ -2,6 +2,7 @@ package app
 
 import (
 	endpoint "agregator/api/internal/endpoint/app"
+	"agregator/api/internal/interfaces"
 	api "agregator/api/internal/transport/rest"
 	"log"
 )
@@ -11,8 +12,8 @@ type App struct {
 	api *api.API
 }
 
-func New() *App {
-	api, err := api.New()
+func New(logger interfaces.Logger) *App {
+	api, err := api.New(logger)
 	if err != nil {
 		log.Fatal(err)
 	}
