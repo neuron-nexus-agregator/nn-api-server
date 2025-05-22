@@ -3,6 +3,7 @@ package app
 import (
 	endpoint "agregator/api/internal/endpoint/app"
 	api "agregator/api/internal/transport/rest"
+	"log"
 )
 
 type App struct {
@@ -11,9 +12,13 @@ type App struct {
 }
 
 func New() *App {
+	api, err := api.New()
+	if err != nil {
+		log.Fatal(err)
+	}
 	return &App{
 		app: endpoint.New(),
-		api: api.New(),
+		api: api,
 	}
 }
 

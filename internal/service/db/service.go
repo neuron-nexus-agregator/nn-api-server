@@ -17,11 +17,7 @@ import (
 )
 
 type DB struct {
-	host     string
-	port     string
-	login    string
-	password string
-	db_name  string
+	db *sqlx.DB
 }
 
 type newsDB struct {
@@ -35,29 +31,19 @@ type newsDB struct {
 	SourcesJSON json.RawMessage `db:"sources_json"` // Здесь будет JSON-массив источников
 }
 
-func New() *DB {
-	return &DB{
-		host:     os.Getenv("DB_HOST"),
-		port:     os.Getenv("DB_PORT"),
-		login:    os.Getenv("DB_LOGIN"),
-		password: os.Getenv("DB_PASSWORD"),
-		db_name:  "newagregator",
-	}
-}
+func New() (*DB, error) {
 
-func (g *DB) connectToDB() (*sqlx.DB, error) {
-	connectionData := fmt.Sprintf("user=%s dbname=%s sslmode=disable password=%s host=%s port=%s", g.login, g.db_name, g.password, g.host, g.port)
-	return sqlx.Connect("postgres", connectionData)
+	connectionData := fmt.Sprintf("user=%s dbname=%s sslmode=disable password=%s host=%s port=%s", os.Getenv("DB_LOGIN"), "newagregator", os.Getenv("DB_PASSWORD"), os.Getenv("DB_HOST"), os.Getenv("DB_PORT"))
+	db, err := sqlx.Connect("postgres", connectionData)
+
+	return &DB{
+		db: db,
+	}, err
 }
 
 func (g *DB) GetLastIndex() (uint64, error) {
-	db, err := g.connectToDB()
-	if err != nil {
-		return 0, err
-	}
-	defer db.Close()
 	var index uint64
-	err = db.QueryRow("SELECT MAX(id) FROM groups").Scan(&index)
+	err := g.db.QueryRow("SELECT MAX(id) FROM groups").Scan(&index)
 	if err != nil {
 		return 0, err
 	}
@@ -65,13 +51,6 @@ func (g *DB) GetLastIndex() (uint64, error) {
 }
 
 func (g *DB) Get(lastDate time.Time, limit uint64, search ...string) ([]model.List, error) {
-	db, err := g.connectToDB()
-	if err != nil {
-		log.Default().Println("Error connecting to DB: ", err.Error())
-		return nil, err
-	}
-	defer db.Close()
-
 	// Базовый SQL-запрос
 	baseReq := `
         SELECT 
@@ -119,7 +98,7 @@ func (g *DB) Get(lastDate time.Time, limit uint64, search ...string) ([]model.Li
 	args = append(args, limit)
 
 	// Выполняем запрос
-	stmt, err := db.Preparex(baseReq)
+	stmt, err := g.db.Preparex(baseReq)
 	if err != nil {
 		log.Default().Println("Error preparing query: ", err.Error())
 		return nil, err
@@ -137,13 +116,6 @@ func (g *DB) Get(lastDate time.Time, limit uint64, search ...string) ([]model.Li
 }
 
 func (g *DB) GetTopGroupsByFeedCount(limit uint64) ([]model.List, error) {
-	db, err := g.connectToDB()
-	if err != nil {
-		log.Default().Println("Error connecting to DB: ", err.Error())
-		return nil, err
-	}
-	defer db.Close()
-
 	req := `
         SELECT 
             groups.id, 
@@ -174,7 +146,7 @@ func (g *DB) GetTopGroupsByFeedCount(limit uint64) ([]model.List, error) {
         LIMIT $1
     `
 
-	stmt, err := db.Preparex(req)
+	stmt, err := g.db.Preparex(req)
 	if err != nil {
 		log.Default().Println("Error preparing query: ", err.Error())
 		return nil, err
@@ -192,13 +164,6 @@ func (g *DB) GetTopGroupsByFeedCount(limit uint64) ([]model.List, error) {
 }
 
 func (g *DB) GetRTGroups(limit uint64, is_rt bool) ([]model.List, error) {
-	db, err := g.connectToDB()
-	if err != nil {
-		log.Default().Println("Error connecting to DB: ", err.Error())
-		return nil, err
-	}
-	defer db.Close()
-
 	req := `
         SELECT 
             groups.id, 
@@ -223,7 +188,7 @@ func (g *DB) GetRTGroups(limit uint64, is_rt bool) ([]model.List, error) {
         LIMIT $2
     `
 
-	stmt, err := db.Preparex(req)
+	stmt, err := g.db.Preparex(req)
 	if err != nil {
 		log.Default().Println("Error preparing query: ", err.Error())
 		return nil, err
@@ -241,12 +206,6 @@ func (g *DB) GetRTGroups(limit uint64, is_rt bool) ([]model.List, error) {
 }
 
 func (g *DB) GetSimilarGroups(id, limit uint64) ([]model.List, error) {
-	db, err := g.connectToDB()
-	if err != nil {
-		log.Default().Println("Error connecting to DB: ", err.Error())
-		return nil, err
-	}
-	defer db.Close()
 	req := `SELECT
             g.id,
             g.time,
@@ -275,7 +234,7 @@ func (g *DB) GetSimilarGroups(id, limit uint64) ([]model.List, error) {
         LIMIT $2`
 
 	var groups []model.List
-	err = db.Select(&groups, req, id, limit)
+	err := g.db.Select(&groups, req, id, limit)
 	if err != nil {
 		log.Default().Println("Error getting similar groups: ", err.Error())
 		return nil, err
@@ -327,15 +286,8 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
     GROUP BY
         g.id, g.title, g.description, g.full_text, g.time, g.views_count`
 
-	dbClient, err := g.connectToDB()
-	if err != nil {
-		log.Printf("Error connecting to DB: %v", err)
-		return model.News{}, fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer dbClient.Close()
-
 	var dbNews newsDB
-	err = dbClient.Get(&dbNews, req, id)
+	err := g.db.Get(&dbNews, req, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return model.News{}, fmt.Errorf("group with ID %d not found: %w", id, err)
@@ -373,15 +325,40 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
 
 func (g *DB) IncrementVies(id uint64) error {
 	req := `UPDATE groups SET views = views + 1 WHERE id = $1`
-	db, err := g.connectToDB()
-	if err != nil {
-		log.Default().Println("Error connecting to DB: ", err.Error())
-		return err
-	}
-	defer db.Close()
-	_, err = db.Exec(req, id)
+	_, err := g.db.Exec(req, id)
 	if err != nil {
 		log.Default().Println("Error incrementing views: ", err.Error())
+		return err
+	}
+	return nil
+}
+
+func (g *DB) UpdateViews(id uint64, views uint64) error {
+	req := `UPDATE groups SET views = views + $1 WHERE id = $2`
+	_, err := g.db.Exec(req, views, id)
+	if err != nil {
+		log.Default().Println("Error updating views: ", err.Error())
+		return err
+	}
+	return nil
+}
+
+func (g *DB) UpdateViewsBatch(views map[int64]int64) error {
+	tx, err := g.db.Begin()
+	if err != nil {
+		log.Default().Println("Error starting transaction: ", err.Error())
+		return err
+	}
+	for id, views := range views {
+		_, err := tx.Exec(`UPDATE groups SET views = views + $1 WHERE id = $2`, views, id)
+		if err != nil {
+			log.Default().Println("Error updating views: ", err.Error())
+			return err
+		}
+	}
+	err = tx.Commit()
+	if err != nil {
+		log.Default().Println("Error committing transaction: ", err.Error())
 		return err
 	}
 	return nil

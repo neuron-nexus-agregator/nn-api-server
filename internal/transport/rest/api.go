@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"log"
 	"os"
 	"strconv"
@@ -19,17 +20,45 @@ type API struct {
 	cache *redis.RedisCache
 }
 
-func New() *API {
-	return &API{
-		db:    db.New(),
+func New() (*API, error) {
+	db, err := db.New()
+	api := &API{
+		db:    db,
 		cache: redis.New(os.Getenv("REDIS_ADDR"), os.Getenv("REDIS_PASSWORD")),
 	}
+	if err != nil {
+		return nil, err
+	}
+	go api.updateViews(context.Background())
+	return api, nil
 }
 
 func (a *API) Check(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message": "pong",
 	})
+}
+
+func (a *API) updateViews(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Minute)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			views, err := a.cache.GetAllViews()
+			if err != nil {
+				log.Default().Println("Error getting views: ", err.Error())
+				continue
+			}
+			for key, value := range views {
+				err := a.db.UpdateViews(uint64(key), uint64(value))
+				if err != nil {
+					log.Default().Println("Error updating views: ", err.Error())
+				}
+			}
+		}
+	}
 }
 
 func (a *API) GetMax(c *gin.Context) {
@@ -208,9 +237,9 @@ func (a *API) GetByID(c *gin.Context) {
 		log.Println(err)
 	}
 	go func() {
-		err := a.db.IncrementVies(item.ID)
+		err := a.cache.IncViews(id_str)
 		if err != nil {
-			log.Default().Println(err)
+			log.Println(err)
 		}
 	}()
 }

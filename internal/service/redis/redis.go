@@ -3,6 +3,7 @@ package redis
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -37,6 +38,56 @@ func (r *RedisCache) Set(key string, value interface{}, ttl time.Duration) error
 	}
 
 	return nil
+}
+
+func (r *RedisCache) SetViews(id string, value int64, ttl time.Duration) error {
+	return r.Set("views:"+id, value, ttl)
+}
+
+func (r *RedisCache) IncViews(id string) error {
+
+	exists, err := r.client.Exists("views:" + id).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check Redis key existence: %w", err)
+	}
+
+	if exists == 0 {
+		// Если ключа нет, инициализируем его значением из базы
+		return r.SetViews(id, 1, 24*time.Hour)
+	}
+
+	return r.client.Incr("views:" + id).Err()
+}
+
+func (r *RedisCache) GetAllViews() (map[int64]int64, error) {
+	keys, err := r.client.Keys("views:*").Result()
+	if err != nil {
+		return nil, err
+	}
+
+	results := make(map[int64]int64)
+	for _, key := range keys {
+		val, err := r.client.Get(key).Result()
+		if err != nil {
+			continue
+		}
+		key_int64, err := strconv.ParseInt(key[7:], 10, 64)
+		if err != nil {
+			continue
+		}
+		val_int64, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			continue
+		}
+		results[key_int64] = val_int64
+
+		//set value to 0
+		err = r.client.Del(key).Err()
+		if err != nil {
+			continue
+		}
+	}
+	return results, nil
 }
 
 func (r *RedisCache) GetJSON(key string, dest interface{}) (bool, error) {
