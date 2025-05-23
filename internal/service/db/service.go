@@ -251,11 +251,11 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
 	req := `
     SELECT
         g.id,
-        g.title,
-        g.description,
-        g.full_text,
+        fc.title,
+        fc.description,
+        fc.full_text,
         g.time,
-        g.views_count,
+        g.views,
         (
             SELECT COALESCE(f_enc.enclosure, '')
             FROM compares AS c_enc
@@ -287,7 +287,7 @@ func (g *DB) GetByID(id uint64) (model.News, error) {
     WHERE
         g.id = $1
     GROUP BY
-        g.id, g.title, g.description, g.full_text, g.time, g.views_count`
+        g.id, g.title, g.description, g.full_text, g.time, g.views`
 
 	var dbNews newsDB
 	err := g.db.Get(&dbNews, req, id)
