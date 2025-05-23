@@ -27,6 +27,9 @@ func New() *App {
 	}
 	allowedOrigins := strings.Split(allowedAddrStr, ",")
 	for i, origin := range allowedOrigins {
+		if len(origin) == 0 {
+			continue
+		}
 		allowedOrigins[i] = strings.TrimSpace(origin)
 	}
 
