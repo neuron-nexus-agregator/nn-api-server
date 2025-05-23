@@ -21,7 +21,7 @@ func New() *App {
 	api := router.Group("/api")
 	api_v1 := api.Group("/v1")
 
-	allowedAddrStr := os.Getenv("ALLOWED_ADDR")
+	allowedAddrStr := os.Getenv("ALLOWED_CORS_ORIGINS")
 	allowedOrigins := strings.Split(allowedAddrStr, ",")
 	for i, origin := range allowedOrigins {
 		allowedOrigins[i] = strings.TrimSpace(origin)
