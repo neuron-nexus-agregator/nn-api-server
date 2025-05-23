@@ -90,10 +90,6 @@ func (a *API) Get(c *gin.Context) {
 		}
 	}
 
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	c.Header("Access-Control-Allow-Headers", "Content-Type")
-
 	limit, err := strconv.ParseUint(limit_str, 10, 64)
 	if err != nil {
 		limit = 15
@@ -256,9 +252,6 @@ func (a *API) GetByID(c *gin.Context) {
 }
 
 func (a *API) GetSimilar(c *gin.Context) {
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	c.Header("Access-Control-Allow-Headers", "Content-Type")
 	id_str := c.Param("id")
 	id, err := strconv.ParseUint(id_str, 10, 64)
 	if err != nil {

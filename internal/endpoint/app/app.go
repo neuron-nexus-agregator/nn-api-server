@@ -1,6 +1,11 @@
 package app
 
 import (
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +20,23 @@ func New() *App {
 	router := gin.Default()
 	api := router.Group("/api")
 	api_v1 := api.Group("/v1")
+
+	allowedAddrStr := os.Getenv("ALLOWED_ADDR")
+	allowedOrigins := strings.Split(allowedAddrStr, ",")
+	for i, origin := range allowedOrigins {
+		allowedOrigins[i] = strings.TrimSpace(origin)
+	}
+
+	config := cors.DefaultConfig()
+	config.AllowOrigins = allowedOrigins // Используем массив доменов из переменной окружения
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization", "accept", "Cache-Control", "X-Requested-With"}
+	config.AllowCredentials = true
+	config.MaxAge = 12 * time.Hour
+
+	// add CORS middleware to api_v1
+	api_v1.Use(cors.New(config))
+
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	return &App{
 		router: router,
