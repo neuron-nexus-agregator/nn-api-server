@@ -22,6 +22,9 @@ func New() *App {
 	api_v1 := api.Group("/v1")
 
 	allowedAddrStr := os.Getenv("ALLOWED_CORS_ORIGINS")
+	if allowedAddrStr == "" {
+		allowedAddrStr = "*"
+	}
 	allowedOrigins := strings.Split(allowedAddrStr, ",")
 	for i, origin := range allowedOrigins {
 		allowedOrigins[i] = strings.TrimSpace(origin)
